@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <title></title>
+    <meta charset="utf-8">
+    <meta name="generator" content="Three.js Editor">
+    <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+    <link rel="stylesheet" href="css/app.css">
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "./js/three.compat.js",
+            "three/addons/": "./js/addons/",
+            "mindar-image-three": "https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js"
+        }
+    }
+    </script>
+
+    <script type="module">
+        import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.186.0/examples/jsm/loaders/GLTFLoader.js';
+        window.ThreeGLTFLoader = GLTFLoader;
+    </script>
+</head>
+
+<body ontouchstart="">
+
+    <div id="ar-container"></div>
+
+    <div class="log" id="log">asdasdsa</div>
+
+    <div id="overlay">
+        <button id="start-button">Iniciar</button>
+        <div id="progress-container">
+            <div id="progress-bar-track">
+                <div id="progress-bar-fill"></div>
+            </div>
+            <div id="progress-label">Cargando... 0%</div>
+        </div>
+    </div>
+
+    <script type="module">
+
+        import * as THREE from './js/three.module.js';
+        import { APP } from './js/app.js';
+        import { MindARController } from './js/mindar/mindar_controller.js';
+
+        window.THREE = THREE; // Used by APP Scripts.
+
+        const log = document.getElementById('log');
+        const overlay = document.getElementById('overlay');
+        const startButton = document.getElementById('start-button');
+        const arContainer = document.getElementById('ar-container');
+        const progressContainer = document.getElementById('progress-container');
+        const progressFill = document.getElementById('progress-bar-fill');
+        const progressLabel = document.getElementById('progress-label');
+
+        const debugMode = new URLSearchParams(location.search).get('debug') === '1';
+
+        let player = null;
+        let mindarController = null;
+        let loaded = false;
+        let loadPromise = null;
+
+        function setProgress(percent, text) {
+            progressFill.style.width = `${percent}%`;
+            progressLabel.textContent = `${text} ${percent}%`;
+        }
+
+        async function loadEverything() {
+
+            if (loadPromise) return loadPromise;
+
+            loadPromise = (async () => {
+
+                setProgress(0, 'Cargando escena...');
+
+                const text = await new Promise((resolve, reject) => {
+                    const loader = new THREE.FileLoader();
+                    loader.load(
+                        'app.json',
+                        (t) => resolve(t),
+                        (e) => {
+                            if (e.lengthComputable) {
+                                const p = Math.round((e.loaded / e.total) * 25);
+                                setProgress(p, 'Cargando escena...');
+                            }
+                        },
+                        (err) => reject(new Error(err.statusText || 'No se pudo descargar el json'))
+                    );
+                });
+
+                player = new APP.Player({ alpha: true });
+                await player.load(JSON.parse(text));
+                player.setSize(window.innerWidth, window.innerHeight);
+                player.play();
+                setProgress(55, 'Escena lista...');
+
+                document.body.appendChild(player.dom);
+
+                window.addEventListener('resize', function () {
+                    player.setSize(window.innerWidth, window.innerHeight);
+                });
+
+                window.player = player;
+
+                setProgress(85, 'Preparando AR...');
+                log.textContent = 'initializing...';
+
+                await new Promise((resolve) => setTimeout(resolve, 10));
+
+                setProgress(100, 'Listo');
+                loaded = true;
+
+            })().catch((e) => {
+                loaded = false;
+                loadPromise = null;
+                throw e;
+            });
+
+            return loadPromise;
+        }
+
+        startButton.addEventListener('click', async () => {
+
+            progressContainer.style.display = 'flex';
+
+            try {
+                // ========================================================
+                // Desbloqueo inicial de los 3 nuevos audios en el navegador
+                // ========================================================
+                const audiosParaDesbloquear = [
+                    'assets/audio/johnnybacon156-fah-469417.mp3',
+                    'assets/audio/idoberg-space-chords-405055.mp3',
+                    'assets/audio/chakong-lazer-glitch-sfx-rise-electronic-sci-fi-sound-chakongaudio-196507.mp3'
+                ];
+                audiosParaDesbloquear.forEach((ruta) => {
+                    const audio = new Audio(ruta);
+                    audio.load();
+                });
+
+                await loadEverything();
+                if (!loaded) return;
+
+                setProgress(90, 'Iniciando cámara...');
+
+                mindarController = new MindARController(arContainer, player, debugMode);
+                window.mindarController = mindarController;
+
+                await mindarController.start();
+
+                // Ocultar el render estático de player para evitar duplicados
+                if (player?.dom) {
+                    player.dom.style.display = 'none';
+                }
+
+                // Conectar los toques sobre el canvas de RA con los eventos de player (this.onClick de cada objeto)
+                const canvasAR = arContainer.querySelector('canvas');
+                if (canvasAR && player?.events?.pointerdown) {
+                    canvasAR.addEventListener('pointerdown', (e) => {
+                        player.events.pointerdown(e);
+                    });
+                }
+
+                overlay.classList.add('hidden');
+                setTimeout(() => overlay.remove(), 400);
+
+            } catch (e) {
+                console.error('Error durante la carga:', e);
+                startButton.textContent = 'Reintentar';
+                setProgress(0, 'Error al iniciar');
+            }
+
+        });
+
+        loadEverything().catch((e) => {
+            console.error('Error durante la carga automática:', e.message);
+            progressContainer.style.display = 'flex';
+            setProgress(0, 'Error al cargar');
+            startButton.textContent = 'Reintentar';
+        });
+
+    </script>
+</body>
+
+</html>
